@@ -158,6 +158,7 @@ primitives = [
     ("car", car),
     ("cdr", cdr),
     ("cons", cons),
+    ("eqv", eqv),
     ("+", numericBinop (+)),
     ("-", numericBinop (-)),
     ("*", numericBinop (*)),
@@ -230,6 +231,19 @@ cons [x, List xs] = return $ List (x:xs)
 cons [x, DottedList xs xlast] = return $ DottedList (x:xs) xlast
 cons [x, y] = return $ DottedList [x] y
 cons badArgList = throwError $ NumArgs 2 badArgList
+
+eqv :: [LispVal] -> ThrowsError LispVal
+eqv [Bool a1, Bool a2] = return $ Bool $ a1 == a2
+eqv [Number a1, Number a2] = return $ Bool $ a1 == a2
+eqv [String a1, String a2] = return $ Bool $ a1 == a2
+eqv [Atom a1, Atom a2] = return $ Bool $ a1 == a2
+eqv [DottedList xs x, DottedList ys y] = eqv [List (x:xs), List (y:ys)]
+eqv [List xs, List ys] = return $ Bool $ (length xs == length ys) && (all eqvPair $ zip xs ys)
+        where eqvPair (x, y) = case eqv [x, y] of
+                                 Left err -> False
+                                 Right (Bool val) -> val
+eqv [_, _] = return $ Bool $ False
+eqv badArgList = throwError $ NumArgs 2 badArgList
 
 
 readExpr :: String -> ThrowsError LispVal

@@ -1,3 +1,5 @@
+{-# LANGUAGE ExistentialQuantification #-}
+
 -- http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours
 module Main where
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -158,7 +160,9 @@ primitives = [
     ("car", car),
     ("cdr", cdr),
     ("cons", cons),
-    ("eqv", eqv),
+    ("eq?", eqv),
+    ("eqv?", eqv),
+    ("equal", equal),
     ("+", numericBinop (+)),
     ("-", numericBinop (-)),
     ("*", numericBinop (*)),
@@ -244,6 +248,25 @@ eqv [List xs, List ys] = return $ Bool $ (length xs == length ys) && (all eqvPai
                                  Right (Bool val) -> val
 eqv [_, _] = return $ Bool $ False
 eqv badArgList = throwError $ NumArgs 2 badArgList
+
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+
+unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEquals a1 a2 (AnyUnpacker unpacker) =
+  do u1 <- unpacker a1
+     u2 <- unpacker a2
+     return $ u1 == u2
+  `catchError` (const $ return False)
+
+equal :: [LispVal] -> ThrowsError LispVal
+equal [a1, a2] = do
+  primitiveEquals <- liftM or $ mapM (unpackEquals a1 a2) [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
+  eqvEquals <- eqv [a1, a2]
+  return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
+equal badArgList = throwError $ NumArgs 2 badArgList
+
+
+
 
 
 readExpr :: String -> ThrowsError LispVal

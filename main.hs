@@ -11,7 +11,6 @@ data LispVal = Atom String
              | Number Integer
              | String String
              | Bool Bool
-             deriving Show
 
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
@@ -51,18 +50,62 @@ parseNumber = liftM (Number . read) $ many1 digit
 --   let num = read x
 --   return $ Number num
 
+parseList :: Parser LispVal
+parseList = liftM List $ sepBy parseExpr spaces
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+  list <- endBy parseExpr spaces
+  char '.'
+  spaces
+  val <- parseExpr
+  return $ DottedList list val
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+  char '\''
+  x <- parseExpr
+  return $ List [Atom "quote", x]
+
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
          <|> parseString
          <|> parseNumber
+         <|> parseQuoted
+         <|> do
+               char '('
+               list <- try parseList <|> parseDottedList
+               char ')'
+               return list
 
-readExpr :: String -> String
+
+
+showVal :: LispVal -> String
+showVal (Atom name) = name
+showVal (List xs) = "(" ++ unwordsList xs ++ ")"
+showVal (DottedList xs x) = "(" ++ unwordsList xs ++ " . " ++ showVal x ++ ")"
+showVal (Number n) = show n
+showVal (String str) = "\"" ++ str ++ "\""
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
+
+instance Show LispVal where show = showVal
+
+eval :: LispVal -> LispVal
+eval val@(String _) = val
+eval val@(Number _) = val
+eval val@(Bool _) = val
+eval (List [Atom "quote", val]) = val
+
+
+
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left err -> "No match: " ++ show err
-  Right val -> "Found value " ++ show val
-
+  Left err -> String $ "No match: " ++ show err
+  Right val -> val
 
 main :: IO ()
 main = do
-  args <- getArgs
-  putStrLn $ readExpr $ args !! 0
+  getArgs >>= print . eval . readExpr . head

@@ -156,6 +156,7 @@ eval env (List [Atom "if", pred, conseq, alt]) =
        Bool False -> eval env alt
        _ -> eval env conseq
 eval env (List [Atom "set!", Atom var, form]) = eval env form >>= setVar env var
+eval env (List [Atom "load", String filename]) = load filename >>= liftM last . mapM (eval env)
 eval env (List [Atom "define", Atom var, form]) = eval env form >>= defineVar env var
 eval env (List (Atom "define" : List (Atom var : params) : body)) =
   makeNormalFunc env params body >>= defineVar env var
@@ -167,7 +168,6 @@ eval env (List (Atom "lambda" : DottedList params varargs : body)) =
   makeVarArgs varargs env params body
 eval env (List (Atom "lambda" : varargs@(Atom _) : body)) =
   makeVarArgs varargs env [] body
--- eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
 eval env (List (function : args)) = do
   func <- eval env function
   argVals <- mapM (eval env) args
@@ -194,7 +194,7 @@ applyProc [func, List args] = apply func args
 applyProc (func:args) = apply func args
 
 makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
-makePort mode [String filename] = liftM Port $ liftIO openFile filename mode
+makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
 
 closePort :: [LispVal] -> IOThrowsError LispVal
 closePort [Port port] = liftIO $ hClose port >> (return $ Bool True)
@@ -205,8 +205,11 @@ readProc [] = readProc [Port stdin]
 readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
 
 writeProc :: [LispVal] -> IOThrowsError LispVal
-writeProc [] = writeProc [Port stdout]
-writeProc [Port port] obj = liftIO $ hPrint port obj >> (return $ Bool True)
+writeProc [obj] = writeProc [obj, Port stdout]
+writeProc [obj, Port port] = liftIO $ hPrint port obj >> (return $ Bool True)
+
+readContents :: [LispVal] -> IOThrowsError LispVal
+readContents [String filename] = liftM String $ liftIO $ readFile filename
 
 primitives :: [ (String, [LispVal] -> ThrowsError LispVal) ]
 primitives = [
@@ -410,6 +413,14 @@ readOrThrow parser input = case parse parser "lisp" input of
 readExpr = readOrThrow parseExpr
 readExprList = readOrThrow (endBy parseExpr spaces)
 
+load :: String -> IOThrowsError [LispVal]
+load file = (liftIO $ readFile file) >>= liftThrows . readExprList
+
+readAll :: [LispVal] -> IOThrowsError LispVal
+readAll [String file] = do
+  exprs <- load file
+  return $ List exprs
+
 -- readExpr :: String -> ThrowsError LispVal
 -- readExpr input = case parse parseExpr "lisp" input of
 --   Left err -> throwError $ Parser err
@@ -442,19 +453,23 @@ until_ pred prompt action = do
     else action result >> until_ pred prompt action
 
 primitiveBindings :: IO (Env)
-primitiveBindings = nullEnv >>= (flip bindVars $ map makeFunc PrimitiveFunc primitives
-                                               ++ map makeFunc IOFunc ioPrimitives)
+primitiveBindings = nullEnv >>= (flip bindVars $ map (makeFunc PrimitiveFunc) primitives
+                                               ++ map (makeFunc IOFunc) ioPrimitives)
   where makeFunc constructor (var, func) = (var, constructor func)
 
-runOne :: String -> IO ()
-runOne expr = primitiveBindings >>= flip evalAndPrint expr
+-- runOne :: String -> IO ()
+-- runOne expr = primitiveBindings >>= flip evalAndPrint expr
+runOne :: [String] -> IO ()
+runOne (file:args) =
+  let lispArgs = List $ map String args
+      cmd = List [Atom "load", String file]
+      in do
+        env <- primitiveBindings >>= flip bindVars [("args", lispArgs)]
+        (runIOThrows $ liftM show $ eval env cmd) >>= hPutStrLn stderr
 
 runRepl :: IO ()
 runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "λ>>> ") . evalAndPrint
 
 main :: IO ()
 main = do args <- getArgs
-          case length args of
-               0 -> runRepl
-               1 -> runOne $ first args
-               _ -> putStrLn "0 or 1 arguments please"
+          if null args then runRepl else runOne args

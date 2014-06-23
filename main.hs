@@ -231,7 +231,7 @@ primitives = [
     ("cons", cons),
     ("eq?", eqv),
     ("eqv?", eqv),
-    ("equal", equal),
+    ("equal?", equal),
     ("+", numericBinop (+)),
     ("-", numericBinop (-)),
     ("*", numericBinop (*)),
